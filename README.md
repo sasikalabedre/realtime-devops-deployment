@@ -38,7 +38,7 @@ Do not commit real secrets to GitHub.
 
 ## Local test
 
-1. Copy `.env.example` to `.env`.
+1. Copy `.env.example` to  `.env`.
 2. Set a local practice PostgreSQL password.
 3. Build and start:
 
