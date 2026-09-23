@@ -93,4 +93,4 @@ Create:
 
 Update `EC2_HOST` in the Jenkinsfile with the real EC2 public IP or DNS.
 
-For a production environment, move database credentials to a proper secret store instead of putting them in the Jenkinsfile or shell environment.
+For a production environment, move database credentials to a proper secret store instead of putting them in the Jenkinsfile or shell environment.Thank you
