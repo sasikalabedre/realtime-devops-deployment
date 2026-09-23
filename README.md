@@ -4,7 +4,7 @@ This project is structured for a realistic beginner/junior DevOps workflow:
 
 GitHub
   -> Jenkins
-  -> Docker build
+   -> Docker build
   -> Docker Hub
   -> AWS EC2
   -> Docker Compose
