@@ -12,7 +12,7 @@ GitHub
   -> Node.js backend
   -> PostgreSQL
 
-## Application
+# Application
 
 - Frontend: React + Vite, served by Nginx
 - Backend: Node.js + Express
