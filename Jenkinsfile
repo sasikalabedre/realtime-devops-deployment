@@ -1,123 +1,166 @@
 pipeline {
+
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        DOCKERHUB_USERNAME = "${DOCKERHUB_CREDENTIALS_USR}"
+        FRONTEND_IMAGE = 'yuvarajm1810/realtime-frontend-v1'
+        BACKEND_IMAGE  = 'yuvarajm1810/realtime-backend-v1'
 
-        FRONTEND_IMAGE = "${DOCKERHUB_USERNAME}/devops-3tier-frontend"
-        BACKEND_IMAGE  = "${DOCKERHUB_USERNAME}/devops-3tier-backend"
-        IMAGE_TAG = "${BUILD_NUMBER}"
-
-        EC2_SSH_CREDENTIALS = 'ec2-ssh-key'
-        EC2_HOST = 'YOUR_EC2_PUBLIC_IP_OR_DNS'
         EC2_USER = 'ubuntu'
-        DEPLOY_DIR = '/opt/devops-3tier-app'
+        EC2_HOST = '13.206.69.111'
+        EC2_APP_DIR = '/home/ubuntu/realtime-3tier-app'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
+                echo 'Checking out code from GitHub...'
+
                 checkout scm
             }
         }
 
+
         stage('Build Frontend Image') {
             steps {
+                echo 'Building frontend Docker image...'
+
                 sh '''
                     set -e
+
                     docker build \
-                      -t "$FRONTEND_IMAGE:$IMAGE_TAG" \
-                      -t "$FRONTEND_IMAGE:latest" \
-                      ./frontend
+                        -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} \
+                        -t ${FRONTEND_IMAGE}:latest \
+                        ./frontend
                 '''
             }
         }
+
 
         stage('Build Backend Image') {
             steps {
+                echo 'Building backend Docker image...'
+
                 sh '''
                     set -e
+
                     docker build \
-                      -t "$BACKEND_IMAGE:$IMAGE_TAG" \
-                      -t "$BACKEND_IMAGE:latest" \
-                      ./backend
+                        -t ${BACKEND_IMAGE}:${BUILD_NUMBER} \
+                        -t ${BACKEND_IMAGE}:latest \
+                        ./backend
                 '''
             }
         }
+
 
         stage('Push Images to Docker Hub') {
             steps {
-                sh '''
-                    set -e
-                    echo "$DOCKERHUB_CREDENTIALS_PSW" | docker login \
-                      --username "$DOCKERHUB_CREDENTIALS_USR" \
-                      --password-stdin
+                echo 'Pushing images to Docker Hub...'
 
-                    docker push "$FRONTEND_IMAGE:$IMAGE_TAG"
-                    docker push "$FRONTEND_IMAGE:latest"
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
 
-                    docker push "$BACKEND_IMAGE:$IMAGE_TAG"
-                    docker push "$BACKEND_IMAGE:latest"
-
-                    docker logout
-                '''
-            }
-        }
-
-        stage('Deploy to EC2') {
-            steps {
-                sshagent(credentials: [env.EC2_SSH_CREDENTIALS]) {
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" \
-                          "sudo mkdir -p '$DEPLOY_DIR' && sudo chown '$EC2_USER':'$EC2_USER' '$DEPLOY_DIR'"
+                        echo "$DOCKER_PASSWORD" | docker login \
+                            --username "$DOCKER_USER" \
+                            --password-stdin
 
-                        scp -o StrictHostKeyChecking=no \
-                          docker-compose.yml \
-                          database/init.sql \
-                          "$EC2_USER@$EC2_HOST:$DEPLOY_DIR/"
+                        docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                        docker push ${FRONTEND_IMAGE}:latest
 
-                        ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "
-                          set -e
-                          cd '$DEPLOY_DIR'
+                        docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                        docker push ${BACKEND_IMAGE}:latest
 
-                          export FRONTEND_IMAGE='$FRONTEND_IMAGE'
-                          export BACKEND_IMAGE='$BACKEND_IMAGE'
-                          export IMAGE_TAG='$IMAGE_TAG'
-                          export POSTGRES_DB='employee_db'
-                          export POSTGRES_USER='postgres'
-                          export POSTGRES_PASSWORD='CHANGE_ME_ON_EC2'
+                        docker logout
+                    '''
+                }
+            }
+        }
 
-                          echo 'Pulling images...'
-                          docker compose pull
 
-                          echo 'Starting application...'
-                          docker compose up -d --remove-orphans
+        stage('Deploy to EC2') {
+            steps {
+                echo 'Deploying to EC2...'
 
-                          echo 'Running containers...'
-                          docker compose ps
+                sshagent(credentials: ['ec2-ssh']) {
 
-                          echo 'Testing backend health...'
-                          sleep 10
-                          curl -fsS http://127.0.0.1/api/health
+                    sh '''
+                        set -e
 
-                          echo 'Deployment successful.'
-                        "
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << 'EOF'
+
+                            set -e
+
+                            echo "Entering application directory..."
+
+                            cd ${EC2_APP_DIR}
+
+                            echo "Removing old containers..."
+
+                            docker rm -f \
+                                employee-frontend \
+                                employee-backend \
+                                employee-db \
+                                2>/dev/null || true
+
+                            echo "Pulling latest images..."
+
+                            docker compose pull
+
+                            echo "Starting application..."
+
+                            docker compose up -d
+
+                            echo "Checking container status..."
+
+                            docker compose ps
+
+EOF
                     '''
                 }
             }
         }
     }
 
+
     post {
+
         success {
-            echo "Build ${BUILD_NUMBER}: images pushed and EC2 deployment completed."
+            echo '''
+            ==========================================
+            DEPLOYMENT SUCCESSFUL
+            ==========================================
+            Frontend, Backend and Database are running
+            successfully on EC2.
+            ==========================================
+            '''
         }
+
         failure {
-            echo "Build ${BUILD_NUMBER}: pipeline failed."
+            echo '''
+            ==========================================
+            DEPLOYMENT FAILED
+            ==========================================
+            Please check the Jenkins console output.
+            ==========================================
+            '''
+        }
+
+        always {
+            echo 'Cleaning unused Docker images on Jenkins...'
+
+            sh '''
+                docker image prune -f || true
+            '''
         }
     }
 }
