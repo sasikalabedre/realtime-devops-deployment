@@ -16,18 +16,12 @@ pipeline {
         EC2_USER    = 'ubuntu'
         EC2_HOST    = '3.110.173.66'
         EC2_APP_DIR = '/home/ubuntu/realtime-3tier-app'
-
-        // Jenkins credentials
-        GITHUB_CREDENTIALS  = 'github-credentials'
-        DOCKER_CREDENTIALS  = 'dockerhub-credentials'
-        EC2_CREDENTIALS     = 'ec2-ssh-key'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-
                 echo 'Checking out code from GitHub...'
 
                 checkout([
@@ -35,16 +29,14 @@ pipeline {
                     branches: [[name: "*/${GIT_BRANCH}"]],
                     userRemoteConfigs: [[
                         url: "${GIT_REPO}",
-                        credentialsId: "${GITHUB_CREDENTIALS}"
+                        credentialsId: 'github-credentials'
                     ]]
                 ])
             }
         }
 
-
         stage('Build Backend Image') {
             steps {
-
                 echo 'Building backend Docker image...'
 
                 sh '''
@@ -58,10 +50,8 @@ pipeline {
             }
         }
 
-
         stage('Build Frontend Image') {
             steps {
-
                 echo 'Building frontend Docker image...'
 
                 sh '''
@@ -75,15 +65,13 @@ pipeline {
             }
         }
 
-
         stage('Login to Docker Hub') {
             steps {
-
                 echo 'Logging in to Docker Hub...'
 
                 withCredentials([
                     usernamePassword(
-                        credentialsId: "${DOCKER_CREDENTIALS}",
+                        credentialsId: 'dockerhub-credentials',
                         usernameVariable: 'DOCKER_USERNAME',
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
@@ -93,18 +81,16 @@ pipeline {
                         set -e
 
                         echo "$DOCKER_PASSWORD" | docker login \
-                            -u "$DOCKER_USERNAME" \
+                            --username "$DOCKER_USERNAME" \
                             --password-stdin
                     '''
                 }
             }
         }
 
-
         stage('Push Docker Images') {
             steps {
-
-                echo 'Pushing backend and frontend images to Docker Hub...'
+                echo 'Pushing Docker images to Docker Hub...'
 
                 sh '''
                     set -e
@@ -118,192 +104,281 @@ pipeline {
             }
         }
 
-
         stage('Logout Docker Hub') {
             steps {
-
                 sh '''
                     docker logout || true
                 '''
             }
         }
 
-
-        stage('Prepare EC2 Deployment Folder') {
+        stage('Test EC2 SSH Connection') {
             steps {
+                echo 'Testing Jenkins to EC2 SSH connection...'
 
-                echo 'Preparing EC2 deployment folder...'
-
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} \
+                        chmod 600 "$EC2_KEY"
+
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" \
+                            "echo 'SSH connection to EC2 successful'; hostname; docker --version"
+                    '''
+                }
+            }
+        }
+
+        stage('Prepare EC2 Deployment Folder') {
+            steps {
+                echo 'Preparing EC2 deployment folder...'
+
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
+
+                    sh '''
+                        set -e
+
+                        chmod 600 "$EC2_KEY"
+
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" \
                             "mkdir -p ${EC2_APP_DIR}/database"
                     '''
                 }
             }
         }
 
-
         stage('Copy Docker Compose File') {
             steps {
-
                 echo 'Copying docker-compose.yml to EC2...'
 
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        scp -o StrictHostKeyChecking=no \
+                        chmod 600 "$EC2_KEY"
+
+                        scp \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
                             docker-compose.yml \
-                            ${EC2_USER}@${EC2_HOST}:${EC2_APP_DIR}/docker-compose.yml
+                            "$SSH_USERNAME@$EC2_HOST:${EC2_APP_DIR}/docker-compose.yml"
                     '''
                 }
             }
         }
-
 
         stage('Copy Database File') {
             steps {
-
                 echo 'Copying database initialization file to EC2...'
 
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        scp -o StrictHostKeyChecking=no \
+                        chmod 600 "$EC2_KEY"
+
+                        scp \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
                             database/init.sql \
-                            ${EC2_USER}@${EC2_HOST}:${EC2_APP_DIR}/database/init.sql
+                            "$SSH_USERNAME@$EC2_HOST:${EC2_APP_DIR}/database/init.sql"
                     '''
                 }
             }
         }
-
 
         stage('Stop Old Application Containers') {
             steps {
-
                 echo 'Stopping old backend and frontend containers...'
 
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} << EOF
+                        chmod 600 "$EC2_KEY"
 
-                        docker stop employee-backend employee-frontend 2>/dev/null || true
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" << EOF
 
-                        docker rm employee-backend employee-frontend 2>/dev/null || true
+docker stop employee-backend employee-frontend 2>/dev/null || true
+
+docker rm employee-backend employee-frontend 2>/dev/null || true
 
 EOF
                     '''
                 }
             }
         }
-
 
         stage('Remove Old Application Images') {
             steps {
-
                 echo 'Removing old backend and frontend images from EC2...'
 
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} << EOF
+                        chmod 600 "$EC2_KEY"
 
-                        docker image rm -f ${BACKEND_IMAGE}:latest 2>/dev/null || true
-                        docker image rm -f ${FRONTEND_IMAGE}:latest 2>/dev/null || true
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" << EOF
+
+docker image rm -f ${BACKEND_IMAGE}:latest 2>/dev/null || true
+docker image rm -f ${FRONTEND_IMAGE}:latest 2>/dev/null || true
 
 EOF
                     '''
                 }
             }
         }
-
 
         stage('Pull Latest Images on EC2') {
             steps {
+                echo 'Pulling latest images on EC2...'
 
-                echo 'Pulling latest Docker images on EC2...'
-
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} << EOF
+                        chmod 600 "$EC2_KEY"
 
-                        docker pull ${BACKEND_IMAGE}:latest
-                        docker pull ${FRONTEND_IMAGE}:latest
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" << EOF
+
+docker pull ${BACKEND_IMAGE}:latest
+docker pull ${FRONTEND_IMAGE}:latest
 
 EOF
                     '''
                 }
             }
         }
-
 
         stage('Deploy Application') {
             steps {
+                echo 'Deploying application with Docker Compose...'
 
-                echo 'Starting application with Docker Compose...'
-
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} << EOF
+                        chmod 600 "$EC2_KEY"
 
-                        cd ${EC2_APP_DIR}
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" << EOF
 
-                        docker compose up -d --no-build --force-recreate
+cd ${EC2_APP_DIR}
+
+docker compose up -d --no-build --force-recreate
 
 EOF
                     '''
                 }
             }
         }
-
 
         stage('Verify Deployment') {
             steps {
+                echo 'Verifying deployed containers...'
 
-                echo 'Checking deployed containers...'
-
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} << EOF
+                        chmod 600 "$EC2_KEY"
 
-                        echo "===== CONTAINERS ====="
-                        docker ps
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" << EOF
 
-                        echo "===== BACKEND ====="
-                        docker ps --filter "name=employee-backend"
+echo "===== ALL CONTAINERS ====="
+docker ps
 
-                        echo "===== FRONTEND ====="
-                        docker ps --filter "name=employee-frontend"
+echo "===== BACKEND ====="
+docker ps --filter "name=employee-backend"
 
-                        echo "===== DATABASE ====="
-                        docker ps --filter "name=employee-db"
+echo "===== FRONTEND ====="
+docker ps --filter "name=employee-frontend"
+
+echo "===== DATABASE ====="
+docker ps --filter "name=employee-db"
 
 EOF
                     '''
@@ -311,19 +386,27 @@ EOF
             }
         }
 
-
         stage('Cleanup Old Docker Images') {
             steps {
-
                 echo 'Cleaning unused Docker images on EC2...'
 
-                sshagent(credentials: ["${EC2_CREDENTIALS}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'ec2-ssh-key',
+                        keyFileVariable: 'EC2_KEY',
+                        usernameVariable: 'SSH_USERNAME'
+                    )
+                ]) {
 
                     sh '''
                         set -e
 
-                        ssh -o StrictHostKeyChecking=no \
-                            ${EC2_USER}@${EC2_HOST} \
+                        chmod 600 "$EC2_KEY"
+
+                        ssh \
+                            -i "$EC2_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            "$SSH_USERNAME@$EC2_HOST" \
                             "docker image prune -f"
                     '''
                 }
@@ -331,30 +414,30 @@ EOF
         }
     }
 
-
     post {
 
         success {
-
-            echo '========================================='
-            echo 'DEPLOYMENT SUCCESSFUL'
-            echo '========================================='
+            echo '''
+=========================================
+DEPLOYMENT SUCCESSFUL
+=========================================
+'''
             echo "Build Number: ${BUILD_NUMBER}"
-            echo "Backend: ${BACKEND_IMAGE}:${BUILD_NUMBER}"
-            echo "Frontend: ${FRONTEND_IMAGE}:${BUILD_NUMBER}"
-            echo "EC2: ${EC2_HOST}"
+            echo "Backend Image: ${BACKEND_IMAGE}:${BUILD_NUMBER}"
+            echo "Frontend Image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}"
+            echo "EC2 Server: ${EC2_HOST}"
         }
 
         failure {
-
-            echo '========================================='
-            echo 'DEPLOYMENT FAILED'
-            echo '========================================='
-            echo "Check the Jenkins console output for the failed stage."
+            echo '''
+=========================================
+DEPLOYMENT FAILED
+=========================================
+'''
+            echo "Check the failed stage above."
         }
 
         always {
-
             echo 'Jenkins pipeline completed.'
         }
     }
