@@ -22,6 +22,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
+
                 echo 'Checking out code from GitHub...'
 
                 checkout([
@@ -37,6 +38,7 @@ pipeline {
 
         stage('Build Backend Image') {
             steps {
+
                 echo 'Building backend Docker image...'
 
                 sh '''
@@ -52,6 +54,7 @@ pipeline {
 
         stage('Build Frontend Image') {
             steps {
+
                 echo 'Building frontend Docker image...'
 
                 sh '''
@@ -67,6 +70,7 @@ pipeline {
 
         stage('Login to Docker Hub') {
             steps {
+
                 echo 'Logging in to Docker Hub...'
 
                 withCredentials([
@@ -90,6 +94,7 @@ pipeline {
 
         stage('Push Docker Images') {
             steps {
+
                 echo 'Pushing Docker images to Docker Hub...'
 
                 sh '''
@@ -106,6 +111,7 @@ pipeline {
 
         stage('Logout Docker Hub') {
             steps {
+
                 sh '''
                     docker logout || true
                 '''
@@ -114,6 +120,7 @@ pipeline {
 
         stage('Test EC2 SSH Connection') {
             steps {
+
                 echo 'Testing Jenkins to EC2 SSH connection...'
 
                 withCredentials([
@@ -141,6 +148,7 @@ pipeline {
 
         stage('Prepare EC2 Deployment Folder') {
             steps {
+
                 echo 'Preparing EC2 deployment folder...'
 
                 withCredentials([
@@ -168,6 +176,7 @@ pipeline {
 
         stage('Copy Docker Compose File') {
             steps {
+
                 echo 'Copying docker-compose.yml to EC2...'
 
                 withCredentials([
@@ -195,6 +204,7 @@ pipeline {
 
         stage('Copy Database File') {
             steps {
+
                 echo 'Copying database initialization file to EC2...'
 
                 withCredentials([
@@ -222,6 +232,7 @@ pipeline {
 
         stage('Stop Old Application Containers') {
             steps {
+
                 echo 'Stopping old backend and frontend containers...'
 
                 withCredentials([
@@ -254,6 +265,7 @@ EOF
 
         stage('Remove Old Application Images') {
             steps {
+
                 echo 'Removing old backend and frontend images from EC2...'
 
                 withCredentials([
@@ -285,6 +297,7 @@ EOF
 
         stage('Pull Latest Images on EC2') {
             steps {
+
                 echo 'Pulling latest images on EC2...'
 
                 withCredentials([
@@ -316,6 +329,7 @@ EOF
 
         stage('Deploy Application') {
             steps {
+
                 echo 'Deploying application with Docker Compose...'
 
                 withCredentials([
@@ -348,6 +362,7 @@ EOF
 
         stage('Verify Deployment') {
             steps {
+
                 echo 'Verifying deployed containers...'
 
                 withCredentials([
@@ -388,6 +403,7 @@ EOF
 
         stage('Cleanup Old Docker Images') {
             steps {
+
                 echo 'Cleaning unused Docker images on EC2...'
 
                 withCredentials([
@@ -417,27 +433,51 @@ EOF
     post {
 
         success {
-            echo '''
-=========================================
-DEPLOYMENT SUCCESSFUL
-=========================================
-'''
-            echo "Build Number: ${BUILD_NUMBER}"
-            echo "Backend Image: ${BACKEND_IMAGE}:${BUILD_NUMBER}"
-            echo "Frontend Image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}"
-            echo "EC2 Server: ${EC2_HOST}"
+
+            emailext(
+                to: "yuvarajm.ops@gmail.com",
+                subject: "SUCCESS: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+Jenkins Build Successful
+
+Project: ${JOB_NAME}
+Build: #${BUILD_NUMBER}
+Status: SUCCESS
+
+Real-time 3-tier application was successfully deployed.
+
+Backend Image: ${BACKEND_IMAGE}:${BUILD_NUMBER}
+Frontend Image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+EC2 Server: ${EC2_HOST}
+
+Build URL:
+${BUILD_URL}
+"""
+            )
         }
 
         failure {
-            echo '''
-=========================================
-DEPLOYMENT FAILED
-=========================================
-'''
-            echo "Check the failed stage above."
+
+            emailext(
+                to: "yuvarajm.ops@gmail.com",
+                subject: "FAILED: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+Jenkins Build Failed
+
+Project: ${JOB_NAME}
+Build: #${BUILD_NUMBER}
+Status: FAILED
+
+Please check the Jenkins console output.
+
+Build URL:
+${BUILD_URL}
+"""
+            )
         }
 
         always {
+
             echo 'Jenkins pipeline completed.'
         }
     }
