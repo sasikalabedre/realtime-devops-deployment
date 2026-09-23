@@ -14,42 +14,50 @@ pipeline {
         // GitHub
         // ==============================
         GIT_REPO = 'https://github.com/yuvarajm-devops/devops-full-practice.git'
+        GIT_BRANCH = 'main'
 
         // ==============================
         // EC2
         // ==============================
-        EC2_USER = 'ubuntu'
-        EC2_HOST = '3.110.173.66'
-
-        // NEW deployment folder
-        EC2_APP_DIR = '/home/ubuntu/realtime-3tier-app-new'
+        EC2_USER    = 'ubuntu'
+        EC2_HOST    = '3.110.173.66'
+        EC2_APP_DIR = '/home/ubuntu/realtime-3tier-app'
     }
 
     stages {
 
-        // ==================================================
-        // 1. CHECKOUT
-        // ==================================================
+        // ==========================================
+        // CHECKOUT
+        // ==========================================
 
         stage('Checkout') {
             steps {
 
-                echo '======================================'
-                echo 'CHECKOUT FROM GITHUB'
-                echo '======================================'
+                echo '''
+========================================
+CHECKOUT FROM GITHUB
+========================================
+'''
 
-                git(
-                    branch: 'main',
-                    credentialsId: 'github-credentials',
-                    url: "${GIT_REPO}"
-                )
+                checkout([
+                    $class: 'GitSCM',
+
+                    branches: [[
+                        name: "*/${GIT_BRANCH}"
+                    ]],
+
+                    userRemoteConfigs: [[
+                        url: "${GIT_REPO}",
+                        credentialsId: 'github-credentials'
+                    ]]
+                ])
             }
         }
 
 
-        // ==================================================
-        // 2. BUILD BACKEND
-        // ==================================================
+        // ==========================================
+        // BUILD BACKEND
+        // ==========================================
 
         stage('Build Backend Image') {
             steps {
@@ -57,9 +65,9 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "======================================"
+                    echo "========================================"
                     echo "BUILDING BACKEND IMAGE"
-                    echo "======================================"
+                    echo "========================================"
 
                     docker build \
                         -t ${BACKEND_IMAGE}:${BUILD_NUMBER} \
@@ -72,9 +80,9 @@ pipeline {
         }
 
 
-        // ==================================================
-        // 3. BUILD FRONTEND
-        // ==================================================
+        // ==========================================
+        // BUILD FRONTEND
+        // ==========================================
 
         stage('Build Frontend Image') {
             steps {
@@ -82,9 +90,9 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "======================================"
+                    echo "========================================"
                     echo "BUILDING FRONTEND IMAGE"
-                    echo "======================================"
+                    echo "========================================"
 
                     docker build \
                         -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} \
@@ -97,9 +105,9 @@ pipeline {
         }
 
 
-        // ==================================================
-        // 4. PUSH TO DOCKER HUB
-        // ==================================================
+        // ==========================================
+        // PUSH TO DOCKER HUB
+        // ==========================================
 
         stage('Push Images to Docker Hub') {
 
@@ -116,34 +124,31 @@ pipeline {
                     sh '''
                         set -e
 
-                        echo "======================================"
+                        echo "========================================"
                         echo "LOGIN TO DOCKER HUB"
-                        echo "======================================"
+                        echo "========================================"
 
                         echo "$DOCKER_PASSWORD" | docker login \
                             --username "$DOCKER_USERNAME" \
                             --password-stdin
 
-
-                        echo "======================================"
+                        echo "========================================"
                         echo "PUSHING BACKEND"
-                        echo "======================================"
+                        echo "========================================"
 
                         docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
                         docker push ${BACKEND_IMAGE}:latest
 
-
-                        echo "======================================"
+                        echo "========================================"
                         echo "PUSHING FRONTEND"
-                        echo "======================================"
+                        echo "========================================"
 
                         docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
                         docker push ${FRONTEND_IMAGE}:latest
 
-
-                        echo "======================================"
+                        echo "========================================"
                         echo "DOCKER HUB PUSH COMPLETED"
-                        echo "======================================"
+                        echo "========================================"
 
                         docker logout
                     '''
@@ -152,58 +157,39 @@ pipeline {
         }
 
 
-        // ==================================================
-        // 5. PREPARE EC2
-        // ==================================================
+        // ==========================================
+        // PREPARE EC2
+        // ==========================================
 
         stage('Prepare EC2 Deployment Folder') {
 
             steps {
 
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ec2-ssh-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                sshagent(['ec2-ssh-key']) {
 
                     sh '''
                         set -e
 
-                        echo "======================================"
-                        echo "PREPARING EC2"
-                        echo "======================================"
+                        echo "========================================"
+                        echo "CONNECTING TO EC2"
+                        echo "========================================"
 
-                        chmod 600 "$SSH_KEY"
-
-                        ssh \
-                            -i "$SSH_KEY" \
-                            -o StrictHostKeyChecking=no \
-                            "$SSH_USER@$EC2_HOST" << EOF
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << EOF
 
                             set -e
 
-                            echo "Creating application directory..."
+                            echo "Creating application directory if required..."
 
-                            mkdir -p "$EC2_APP_DIR"
+                            mkdir -p ${EC2_APP_DIR}
 
-                            echo "Checking .env..."
+                            cd ${EC2_APP_DIR}
 
-                            if [ ! -f "$EC2_APP_DIR/.env" ]; then
-                                echo "ERROR: .env file is missing from $EC2_APP_DIR"
-                                exit 1
-                            fi
+                            echo "Current application directory:"
+                            pwd
 
-                            echo ".env exists."
-
-                            echo "Checking Docker..."
-
-                            docker --version
-
-                            echo "Checking Docker Compose..."
-
-                            docker compose version
+                            echo "Existing files:"
+                            ls -la
 
 EOF
                     '''
@@ -212,115 +198,205 @@ EOF
         }
 
 
-        // ==================================================
-        // 6. COPY COMPOSE FILE
-        // ==================================================
+        // ==========================================
+        // COPY COMPOSE + DATABASE FILE
+        // ==========================================
 
         stage('Copy Docker Compose') {
 
             steps {
 
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ec2-ssh-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                sshagent(['ec2-ssh-key']) {
 
                     sh '''
                         set -e
 
-                        echo "======================================"
-                        echo "COPYING DOCKER COMPOSE"
-                        echo "======================================"
+                        echo "========================================"
+                        echo "COPYING DOCKER COMPOSE FILE"
+                        echo "========================================"
 
-                        chmod 600 "$SSH_KEY"
-
-                        scp \
-                            -i "$SSH_KEY" \
-                            -o StrictHostKeyChecking=no \
+                        scp -o StrictHostKeyChecking=no \
                             docker-compose.yml \
-                            "$SSH_USER@$EC2_HOST:$EC2_APP_DIR/docker-compose.yml"
+                            ${EC2_USER}@${EC2_HOST}:${EC2_APP_DIR}/docker-compose.yml
 
-                        echo "docker-compose.yml copied."
+                        echo "========================================"
+                        echo "CREATING DATABASE DIRECTORY"
+                        echo "========================================"
 
-                        echo ""
-                        echo ".env is NOT copied."
-                        echo ".env remains private on EC2."
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} \
+                            "mkdir -p ${EC2_APP_DIR}/database"
+
+                        echo "========================================"
+                        echo "COPYING DATABASE INIT FILE"
+                        echo "========================================"
+
+                        scp -o StrictHostKeyChecking=no \
+                            database/init.sql \
+                            ${EC2_USER}@${EC2_HOST}:${EC2_APP_DIR}/database/init.sql
+
+                        echo "Compose and database files copied."
                     '''
                 }
             }
         }
 
 
-        // ==================================================
-        // 7. DEPLOY
-        // ==================================================
+        // ==========================================
+        // REMOVE OLD APPLICATION CONTAINERS
+        // ==========================================
+
+        stage('Remove Old Application Containers') {
+
+            steps {
+
+                sshagent(['ec2-ssh-key']) {
+
+                    sh '''
+                        set -e
+
+                        echo "========================================"
+                        echo "REMOVING OLD APPLICATION CONTAINERS"
+                        echo "========================================"
+
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << EOF
+
+                            set -e
+
+                            echo "Stopping backend..."
+
+                            docker stop employee-backend 2>/dev/null || true
+
+                            echo "Removing backend..."
+
+                            docker rm employee-backend 2>/dev/null || true
+
+
+                            echo "Stopping frontend..."
+
+                            docker stop employee-frontend 2>/dev/null || true
+
+                            echo "Removing frontend..."
+
+                            docker rm employee-frontend 2>/dev/null || true
+
+
+                            echo "PostgreSQL container is NOT touched."
+
+                            docker ps -a
+
+EOF
+                    '''
+                }
+            }
+        }
+
+
+        // ==========================================
+        // REMOVE OLD APPLICATION IMAGES
+        // ==========================================
+
+        stage('Remove Old Application Images') {
+
+            steps {
+
+                sshagent(['ec2-ssh-key']) {
+
+                    sh '''
+                        set -e
+
+                        echo "========================================"
+                        echo "REMOVING OLD APPLICATION IMAGES"
+                        echo "========================================"
+
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << EOF
+
+                            set -e
+
+                            docker rmi ${BACKEND_IMAGE}:latest 2>/dev/null || true
+
+                            docker rmi ${FRONTEND_IMAGE}:latest 2>/dev/null || true
+
+                            echo "Old application images removed."
+
+EOF
+                    '''
+                }
+            }
+        }
+
+
+        // ==========================================
+        // PULL NEW IMAGES
+        // ==========================================
+
+        stage('Pull New Images') {
+
+            steps {
+
+                sshagent(['ec2-ssh-key']) {
+
+                    sh '''
+                        set -e
+
+                        echo "========================================"
+                        echo "PULLING NEW BACKEND IMAGE"
+                        echo "========================================"
+
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} \
+                            "docker pull ${BACKEND_IMAGE}:latest"
+
+
+                        echo "========================================"
+                        echo "PULLING NEW FRONTEND IMAGE"
+                        echo "========================================"
+
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} \
+                            "docker pull ${FRONTEND_IMAGE}:latest"
+
+                    '''
+                }
+            }
+        }
+
+
+        // ==========================================
+        // DEPLOY
+        // ==========================================
 
         stage('Deploy Application') {
 
             steps {
 
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ec2-ssh-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                sshagent(['ec2-ssh-key']) {
 
                     sh '''
                         set -e
 
-                        echo "======================================"
+                        echo "========================================"
                         echo "DEPLOYING APPLICATION"
-                        echo "======================================"
+                        echo "========================================"
 
-                        chmod 600 "$SSH_KEY"
-
-                        ssh \
-                            -i "$SSH_KEY" \
-                            -o StrictHostKeyChecking=no \
-                            "$SSH_USER@$EC2_HOST" << EOF
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << EOF
 
                             set -e
 
-                            cd "$EC2_APP_DIR"
+                            cd ${EC2_APP_DIR}
 
-                            echo "======================================"
-                            echo "PULLING BACKEND IMAGE"
-                            echo "======================================"
+                            echo "Starting Docker Compose..."
 
-                            docker pull ${BACKEND_IMAGE}:latest
+                            docker compose up -d
 
-
-                            echo "======================================"
-                            echo "PULLING FRONTEND IMAGE"
-                            echo "======================================"
-
-                            docker pull ${FRONTEND_IMAGE}:latest
-
-
-                            echo "======================================"
-                            echo "STARTING APPLICATION"
-                            echo "======================================"
-
-                            docker compose up -d --no-build
-
-
-                            echo "======================================"
+                            echo "========================================"
                             echo "APPLICATION STATUS"
-                            echo "======================================"
+                            echo "========================================"
 
                             docker compose ps
-
-
-                            echo "======================================"
-                            echo "RUNNING CONTAINERS"
-                            echo "======================================"
-
-                            docker ps
 
 EOF
                     '''
@@ -329,46 +405,47 @@ EOF
         }
 
 
-        // ==================================================
-        // 8. VERIFY
-        // ==================================================
+        // ==========================================
+        // VERIFY
+        // ==========================================
 
         stage('Verify Containers') {
 
             steps {
 
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ec2-ssh-key',
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                sshagent(['ec2-ssh-key']) {
 
                     sh '''
                         set -e
 
-                        echo "======================================"
-                        echo "VERIFYING APPLICATION"
-                        echo "======================================"
+                        echo "========================================"
+                        echo "VERIFYING EC2 CONTAINERS"
+                        echo "========================================"
 
-                        chmod 600 "$SSH_KEY"
-
-                        ssh \
-                            -i "$SSH_KEY" \
-                            -o StrictHostKeyChecking=no \
-                            "$SSH_USER@$EC2_HOST" << EOF
+                        ssh -o StrictHostKeyChecking=no \
+                            ${EC2_USER}@${EC2_HOST} << EOF
 
                             set -e
 
-                            cd "$EC2_APP_DIR"
+                            echo "Running containers:"
+                            docker ps
 
+                            echo ""
+                            echo "Compose status:"
+                            cd ${EC2_APP_DIR}
                             docker compose ps
 
                             echo ""
-                            echo "Checking running containers..."
+                            echo "Checking backend container..."
+                            docker ps --filter "name=employee-backend"
 
-                            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+                            echo ""
+                            echo "Checking frontend container..."
+                            docker ps --filter "name=employee-frontend"
+
+                            echo ""
+                            echo "Checking database container..."
+                            docker ps --filter "name=employee-db"
 
 EOF
                     '''
@@ -377,9 +454,9 @@ EOF
         }
 
 
-        // ==================================================
-        // 9. CLEANUP JENKINS DOCKER
-        // ==================================================
+        // ==========================================
+        // CLEAN JENKINS DOCKER CACHE
+        // ==========================================
 
         stage('Cleanup Jenkins Docker Images') {
 
@@ -388,9 +465,9 @@ EOF
                 sh '''
                     set -e
 
-                    echo "======================================"
+                    echo "========================================"
                     echo "CLEANING UNUSED JENKINS IMAGES"
-                    echo "======================================"
+                    echo "========================================"
 
                     docker image prune -f
 
@@ -401,9 +478,9 @@ EOF
     }
 
 
-    // ==================================================
+    // ==========================================
     // POST ACTIONS
-    // ==================================================
+    // ==========================================
 
     post {
 
@@ -414,12 +491,13 @@ EOF
 DEPLOYMENT SUCCESSFUL
 ========================================
 
-Backend and frontend images were built
-and pushed to Docker Hub.
-
-EC2 deployment completed successfully.
+Backend image built and pushed.
+Frontend image built and pushed.
+EC2 application deployed successfully.
+PostgreSQL/database was preserved.
 '''
         }
+
 
         failure {
 
@@ -431,6 +509,7 @@ DEPLOYMENT FAILED
 Check the Jenkins Console Output.
 '''
         }
+
 
         always {
 
