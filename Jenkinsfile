@@ -10,7 +10,7 @@ pipeline {
 
         // EC2
         EC2_USER    = 'ubuntu'
-        EC2_HOST    = '13.206.69.111'
+        EC2_HOST    = '3.110.173.66'
         EC2_APP_DIR = '/home/ubuntu/realtime-3tier-app'
     }
 
