@@ -4,58 +4,86 @@ services:
     image: postgres:17
     container_name: employee-db
     restart: unless-stopped
+
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-employee_db}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: employee_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
     networks:
       - app-network
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d employee_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+
   backend:
-    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}:${IMAGE_TAG:-latest}
+    image: yuvarajm1810/realtime-backend-v1:latest
     container_name: employee-backend
     restart: unless-stopped
+
     environment:
       PORT: 5000
       DB_HOST: database
       DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-employee_db}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DB_NAME: employee_db
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
     depends_on:
       database:
         condition: service_healthy
+
     networks:
       - app-network
+
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:5000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 10s
 
+
   frontend:
-    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}:${IMAGE_TAG:-latest}
+    image: yuvarajm1810/realtime-frontend-v1:latest
     container_name: employee-frontend
     restart: unless-stopped
+
     ports:
-      - "80:80"
+      - "8082:80"
+
     depends_on:
       backend:
         condition: service_healthy
+
     networks:
       - app-network
 
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
 networks:
   app-network:
+
 
 volumes:
   postgres_data:
