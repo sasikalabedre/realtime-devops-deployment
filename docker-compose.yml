@@ -1,4 +1,4 @@
-services:
+  services:
 
   database:
     image: postgres:17
@@ -14,18 +14,18 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
-    networks:
-      - app-network
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d employee_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+    networks:
+      - app-network
+
 
   backend:
-    image: yuvarajm1810/realtime-backend-v1:latest
+    image: sasikalabedre/realtime-backend:latest
     container_name: employee-backend
     restart: unless-stopped
 
@@ -41,9 +41,6 @@ services:
       database:
         condition: service_healthy
 
-    networks:
-      - app-network
-
     healthcheck:
       test:
         [
@@ -57,9 +54,12 @@ services:
       retries: 5
       start_period: 10s
 
+    networks:
+      - app-network
+
 
   frontend:
-    image: yuvarajm1810/realtime-frontend-v1:latest
+    image: sasikalabedre/realtime-frontend:latest
     container_name: employee-frontend
     restart: unless-stopped
 
@@ -70,9 +70,6 @@ services:
       backend:
         condition: service_healthy
 
-    networks:
-      - app-network
-
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
       interval: 15s
@@ -80,10 +77,12 @@ services:
       retries: 5
       start_period: 10s
 
+    networks:
+      - app-network
+
 
 networks:
   app-network:
-
 
 volumes:
   postgres_data:
