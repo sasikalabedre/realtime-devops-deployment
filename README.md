@@ -7,6 +7,7 @@ GitHub
    -> Docker build
   -> Docker Hub
   -> AWS EC2
+    O
   -> Docker Compose
   -> Nginx/React frontend
   -> Node.js backend
